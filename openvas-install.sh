@@ -10,19 +10,46 @@
 # EDIT THIS SECTION ONLY: All custom settings & dependency mgmt between distros is handled in this section ##############
 #########################################################################################################################
 
+## PROXY CONFIGURATION (fill in your corporate proxy details)
+PROXY_HOST="proxy.example.com"             # Your proxy hostname or IP
+PROXY_PORT="8080"                          # Your proxy port
+PROXY_USER="your_username"                 # Proxy authentication username
+PROXY_PASS="your_password"                 # Proxy authentication password
+
+# Optional: addresses that should bypass the proxy (comma-separated)
+NO_PROXY="127.0.0.1,localhost,*.local"
+
+# -------------------------------------------------------------------------------------
+# Proxy setup
+# Build proxy URL with authentication
+PROXY_URL="http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}"
+export http_proxy="$PROXY_URL"
+export https_proxy="$PROXY_URL"
+export ftp_proxy="$PROXY_URL"
+export no_proxy="$NO_PROXY"
+export HTTP_PROXY="$PROXY_URL"
+export HTTPS_PROXY="$PROXY_URL"
+export FTP_PROXY="$PROXY_URL"
+export NO_PROXY="$NO_PROXY"
+
+# For commands that use sudo, we will use 'sudo -E' to preserve the environment.
+# Define a function to replace 'sudo' with 'sudo -E' for network-related commands.
+# We'll manually replace sudo with sudo -E where needed later.
+echo -e "${LGREEN}Proxy enabled: $PROXY_HOST:$PROXY_PORT${NC}"
+
 ## CUSTOM CONFIG SETTINGS ##
 DEFAULT_ADMIN_USER="admin"            # Set the GVM default admin account username
 DEFAULT_ADMIN_PASS="password"         # Set the GVM default admin account password
 SERVER_NAME=""                        # Preferred server hostname (installer will prompt if left blank)
 LOCAL_DOMAIN=""                       # Local DNS suffix (defaults to hostname.dns-suffix if left blank)
 CERT_DOMAIN=""                        # TLS certificate dns domain (defaults to hostname.dns-suffix if left blank)
-CERT_COUNTRY="AU"                     # For RSA SSL cert, 2 character country code only, must not be blank
-CERT_STATE="Victoria"                 # For RSA SSL cert, Optional to change, must not be blank
-CERT_LOCATION="Melbourne"             # For RSA SSL cert, Optional to change, must not be blank
-CERT_ORG="Itiligent"                  # For RSA SSL cert, Optional to change, must not be blank
+CERT_COUNTRY="RU"                     # For RSA SSL cert, 2 character country code only, must not be blank
+CERT_STATE="Russia"                   # For RSA SSL cert, Optional to change, must not be blank
+CERT_LOCATION="Moscow"                # For RSA SSL cert, Optional to change, must not be blank
+CERT_ORG="OpenVAS"                    # For RSA SSL cert, Optional to change, must not be blank
 CERT_OU="SecOps"                      # For RSA SSL cert, Optional to change, must not be blank
 CERT_DAYS="3650"                      # For RSA SSL cert, number of days until self signed certificate expiry
-KEYSIZE=2048                          # RSA certificate encryption strength
+KEYSIZE=4096                          # RSA certificate encryption strength
 
 ## FORCE PACKAGE VERSIONS or use blank "" to automatically download latest
 FORCE_GVM_LIBS_VERSION=""             # see https://github.com/greenbone/gvm-libs
@@ -63,7 +90,7 @@ esac
 
 ## DEPENDENCY MANAGEMENT (Any changes here must be replicated in the upgrade script)
 # common
-COMMON_DEPS='sudo apt-get install --no-install-recommends --assume-yes build-essential curl cron cmake pkg-config python3 python3-pip gnupg wget sudo gnupg2 ufw htop git && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postfix mailutils && sudo service postfix restart'
+COMMON_DEPS='sudo apt-get install --no-install-recommends --assume-yes build-essential curl cron cmake pkg-config python3 python3-pip gnupg wget sudo gnupg2 ufw htop git corkscrew && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postfix mailutils && sudo service postfix restart'
 
 # gvm-libs
 GVMLIBS_DEPS="sudo apt-get install -y libglib2.0-dev libgpgme-dev libgnutls28-dev uuid-dev libhiredis-dev libxml2-dev libpcap-dev libnet1-dev libpaho-mqtt-dev libldap2-dev libradcli-dev doxygen xmltoman graphviz libcjson-dev lcov libcurl4-gnutls-dev libgcrypt20-dev libssh-dev"
@@ -99,11 +126,13 @@ REDIS_DEPS="sudo apt-get install -y redis-server"
 # openvasd (Any changes here must be replicated in the upgrade script)
 case "${VERSION_CODENAME,,}" in
     *bookworm*|*noble*|*trixie*)  # Options to handle various distros
-        OPENVASD_DEPS="curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo apt-get install -y -qq pkg-config libssl-dev"
+    # ---- Added proxy ----
+        OPENVASD_DEPS="curl -x \"$PROXY_URL\" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo apt-get install -y -qq pkg-config libssl-dev"
 		SOURCE_CARGO_ENV=". \"$HOME/.cargo/env\""
         ;;
     *) # Default to this and customise if necessary
-        OPENVASD_DEPS="curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo apt-get install -y -qq pkg-config libssl-dev"
+    # ---- Added proxy ----
+        OPENVASD_DEPS="curl -x \"$PROXY_URL\" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo apt-get install -y -qq pkg-config libssl-dev"
 		SOURCE_CARGO_ENV=". \"$HOME/.cargo/env\"" # No specific action for other codenames either
         ;;
 esac
@@ -202,6 +231,10 @@ export INSTALL_DIR=$HOME/install
 # Get the default route interface IP address as we need this for TLS certificate creation later
 DEFAULT_IP=$(ip addr show $(ip route | awk '/default/ { print $5 }') | grep "inet" | head -n 1 | awk '/inet/ {print $2}' | cut -d'/' -f1)
 
+# Define a sudo wrapper that preserves proxy environment
+sudo() {
+    command sudo -E "$@"
+}
 
 # An intitial dns suffix is needed as a starting value for the script prompts.
 get_domain_suffix() {
@@ -235,6 +268,27 @@ fi
 # GVM user setup & use this action to trigger our initial sudo prompt
 sudo useradd -r -M -U -G sudo -s /usr/sbin/nologin gvm
 sudo usermod -aG gvm $USER
+
+# Setup corkscrew for rsync feed updates
+
+# Create corkscrew auth file for the current user (will be copied for gvm later)
+CORKSREW_AUTH="$HOME/.corkscrew-auth"
+echo "${PROXY_USER}:${PROXY_PASS}" > "$CORKSREW_AUTH"
+chmod 600 "$CORKSREW_AUTH"
+
+# Copy to gvm user's home and set permissions
+sudo mkdir -p /home/gvm
+sudo cp "$CORKSREW_AUTH" /home/gvm/.corkscrew-auth
+sudo chown gvm:gvm /home/gvm/.corkscrew-auth
+sudo chmod 600 /home/gvm/.corkscrew-auth
+
+# Set RSYNC_CONNECT_PROG in gvm's environment
+# Option 1: via .profile
+echo "export RSYNC_CONNECT_PROG=\"corkscrew $PROXY_HOST $PROXY_PORT %H %p ~/.corkscrew-auth\"" | sudo tee -a /home/gvm/.profile
+# Option 2: via systemd environment file (for services) – but gvmd/ospd don't use rsync directly; feed sync is a separate command.
+
+# Also set it for the current script's future sudo commands that may run feed sync
+export RSYNC_CONNECT_PROG="corkscrew $PROXY_HOST $PROXY_PORT %H %p ~/.corkscrew-auth"
 
 # Fix Python externally managed errors
 python_version_dir=$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -n 1)
@@ -401,7 +455,8 @@ spin() {
     if [[ "${OFFICIAL_POSTGRESQL}" == "true" ]]; then
         sudo apt-get -y install lsb-release &>/dev/null
         sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-        sudo wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.asc >/dev/null
+        # ---- Added proxy ----
+        sudo wget --quiet -e use_proxy=yes -e http_proxy="$PROXY_URL" -e https_proxy="$PROXY_URL" -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/apt.postgresql.org.asc >/dev/null
         sudo apt-get update -qq &>/dev/null
     fi
 
@@ -430,7 +485,8 @@ echo
     # Install common dependencies
     eval $COMMON_DEPS &>/dev/null
 	# Import the Greenbone Community Signing Key
-    curl -f -L https://www.greenbone.net/GBCommunitySigningKey.asc -o /tmp/GBCommunitySigningKey.asc
+    # ---- Added proxy ----
+    curl -x "$PROXY_URL" -f -L https://www.greenbone.net/GBCommunitySigningKey.asc -o /tmp/GBCommunitySigningKey.asc
     gpg --import /tmp/GBCommunitySigningKey.asc
     echo "8AE4BE429B60A59B311C2E739823FAA60ED1E580:6:" | gpg --import-ownertrust
 
@@ -456,7 +512,8 @@ echo -e "#######################################################################
 echo
 # Check for the latest OpenVAS release tags from GitHub
 get_latest_release() {
-    curl --silent "https://api.github.com/repos/$1/releases/latest" | # Get latest release from GitHub API
+    # ---- Added proxy ----
+    curl -x "$PROXY_URL" --silent "https://api.github.com/repos/$1/releases/latest" | # Get latest release from GitHub API
         grep '"tag_name":' |                                          # Get tag line
         sed -E 's/.*"v?([^"]+)".*/\1/'                                # Extract version
 }
@@ -574,8 +631,10 @@ echo
 
 # Download the gvm-libs sources
 export GVM_LIBS_VERSION=$GVM_LIBS_VERSION
-curl -f -L https://github.com/greenbone/gvm-libs/archive/refs/tags/v$GVM_LIBS_VERSION.tar.gz -o $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/gvm-libs/releases/download/v$GVM_LIBS_VERSION/gvm-libs-v$GVM_LIBS_VERSION.tar.gz.asc -o $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gvm-libs/archive/refs/tags/v$GVM_LIBS_VERSION.tar.gz -o $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gvm-libs/releases/download/v$GVM_LIBS_VERSION/gvm-libs-v$GVM_LIBS_VERSION.tar.gz.asc -o $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz.asc $SOURCE_DIR/gvm-libs-$GVM_LIBS_VERSION.tar.gz
 
 # Build gvm-libs
@@ -623,8 +682,10 @@ echo
 
 # Download the gvm-libs sources
 export GVM_LIBS_VERSION=$GVM_LIBS_VERSION
-curl -f -L https://github.com/greenbone/gvmd/archive/refs/tags/v$GVMD_VERSION.tar.gz -o $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/gvmd/releases/download/v$GVMD_VERSION/gvmd-$GVMD_VERSION.tar.gz.asc -o $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gvmd/archive/refs/tags/v$GVMD_VERSION.tar.gz -o $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gvmd/releases/download/v$GVMD_VERSION/gvmd-$GVMD_VERSION.tar.gz.asc -o $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz.asc $SOURCE_DIR/gvmd-$GVMD_VERSION.tar.gz
 
 # Build gvmd
@@ -702,8 +763,10 @@ echo
 
 # Download the pg-gvm sources
 export PG_GVM_VERSION=$PG_GVM_VERSION
-curl -f -L https://github.com/greenbone/pg-gvm/archive/refs/tags/v$PG_GVM_VERSION.tar.gz -o $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/pg-gvm/releases/download/v$PG_GVM_VERSION/pg-gvm-$PG_GVM_VERSION.tar.gz.asc -o $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/pg-gvm/archive/refs/tags/v$PG_GVM_VERSION.tar.gz -o $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/pg-gvm/releases/download/v$PG_GVM_VERSION/pg-gvm-$PG_GVM_VERSION.tar.gz.asc -o $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz.asc $SOURCE_DIR/pg-gvm-$PG_GVM_VERSION.tar.gz
 
 # Build pg-gvm
@@ -728,8 +791,10 @@ echo -e " Building & installing gsa $GSA_VERSION"
 echo -e "###############################################################################${NC}"
 echo
     export GSA_VERSION=$GSA_VERSION
-    curl -f -L https://github.com/greenbone/gsa/releases/download/v$GSA_VERSION/gsa-dist-$GSA_VERSION.tar.gz -o $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz
-    curl -f -L https://github.com/greenbone/gsa/releases/download/v$GSA_VERSION/gsa-dist-$GSA_VERSION.tar.gz.asc -o $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz.asc
+    # ---- Added proxy ----
+    curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gsa/releases/download/v$GSA_VERSION/gsa-dist-$GSA_VERSION.tar.gz -o $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz
+    # ---- Added proxy ----
+    curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gsa/releases/download/v$GSA_VERSION/gsa-dist-$GSA_VERSION.tar.gz.asc -o $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz.asc
     gpg --verify $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz.asc $SOURCE_DIR/gsa-$GSA_VERSION.tar.gz
 
     # Extract & install gsa
@@ -813,8 +878,10 @@ sudo chmod 644 -R $DIR_TLS_KEY
 # Download gsad sources
 echo
 export GSAD_VERSION=$GSAD_VERSION
-curl -f -L https://github.com/greenbone/gsad/archive/refs/tags/v$GSAD_VERSION.tar.gz -o $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/gsad/releases/download/v$GSAD_VERSION/gsad-$GSAD_VERSION.tar.gz.asc -o $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gsad/archive/refs/tags/v$GSAD_VERSION.tar.gz -o $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/gsad/releases/download/v$GSAD_VERSION/gsad-$GSAD_VERSION.tar.gz.asc -o $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz.asc $SOURCE_DIR/gsad-$GSAD_VERSION.tar.gz
 
 # Build gsad
@@ -890,8 +957,10 @@ echo
 
 # Download the openvas-smb sources
 export OPENVAS_SMB_VERSION=$OPENVAS_SMB_VERSION
-curl -f -L https://github.com/greenbone/openvas-smb/archive/refs/tags/v$OPENVAS_SMB_VERSION.tar.gz -o $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/openvas-smb/releases/download/v$OPENVAS_SMB_VERSION/openvas-smb-v$OPENVAS_SMB_VERSION.tar.gz.asc -o $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-smb/archive/refs/tags/v$OPENVAS_SMB_VERSION.tar.gz -o $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-smb/releases/download/v$OPENVAS_SMB_VERSION/openvas-smb-v$OPENVAS_SMB_VERSION.tar.gz.asc -o $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz.asc $SOURCE_DIR/openvas-smb-$OPENVAS_SMB_VERSION.tar.gz
 
 # Build openvas-smb
@@ -936,8 +1005,10 @@ echo
 
 # Download openvas-scanner sources
 export OPENVAS_SCANNER_VERSION=$OPENVAS_SCANNER_VERSION
-curl -f -L https://github.com/greenbone/openvas-scanner/archive/refs/tags/v$OPENVAS_SCANNER_VERSION.tar.gz -o $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/openvas-scanner/releases/download/v$OPENVAS_SCANNER_VERSION/openvas-scanner-v$OPENVAS_SCANNER_VERSION.tar.gz.asc -o $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-scanner/archive/refs/tags/v$OPENVAS_SCANNER_VERSION.tar.gz -o $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-scanner/releases/download/v$OPENVAS_SCANNER_VERSION/openvas-scanner-v$OPENVAS_SCANNER_VERSION.tar.gz.asc -o $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz.asc $SOURCE_DIR/openvas-scanner-$OPENVAS_SCANNER_VERSION.tar.gz
 
 # Build openvas-scanner
@@ -989,8 +1060,10 @@ echo
 
 # Download ospd-openvas sources
 export OSPD_OPENVAS_VERSION=$OSPD_OPENVAS_VERSION
-curl -f -L https://github.com/greenbone/ospd-openvas/archive/refs/tags/v$OSPD_OPENVAS_VERSION.tar.gz -o $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz
-curl -f -L https://github.com/greenbone/ospd-openvas/releases/download/v$OSPD_OPENVAS_VERSION/ospd-openvas-v$OSPD_OPENVAS_VERSION.tar.gz.asc -o $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/ospd-openvas/archive/refs/tags/v$OSPD_OPENVAS_VERSION.tar.gz -o $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/ospd-openvas/releases/download/v$OSPD_OPENVAS_VERSION/ospd-openvas-v$OSPD_OPENVAS_VERSION.tar.gz.asc -o $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz.asc
 gpg --verify $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz.asc $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz
 
 # Install ospd-openvas
@@ -998,7 +1071,8 @@ echo
 tar -C $SOURCE_DIR -xvzf $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION.tar.gz
 cd $SOURCE_DIR/ospd-openvas-$OSPD_OPENVAS_VERSION
 mkdir -p $INSTALL_DIR/ospd-openvas
-${PIP_SUDO_OSPD} python3 -m pip install --root=$INSTALL_DIR/ospd-openvas ${PIP_OPTIONS} .
+# ---- Added proxy ----
+${PIP_SUDO_OSPD} python3 -m pip install --proxy "$PROXY_URL" --root=$INSTALL_DIR/ospd-openvas ${PIP_OPTIONS} .
 sudo cp -rvf $INSTALL_DIR/ospd-openvas/* /
 cat << EOF > $BUILD_DIR/ospd-openvas.service
 [Unit]
@@ -1058,8 +1132,10 @@ echo
 # Download openvasd sources
 echo
 export OPENVAS_DAEMON=$OPENVAS_DAEMON
-curl -f -L https://github.com/greenbone/openvas-scanner/archive/refs/tags/v$OPENVAS_DAEMON.tar.gz -o $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz
-curl -f -L https://github.com/greenbone/openvas-scanner/releases/download/v$OPENVAS_DAEMON/openvas-scanner-v$OPENVAS_DAEMON.tar.gz.asc -o $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-scanner/archive/refs/tags/v$OPENVAS_DAEMON.tar.gz -o $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://github.com/greenbone/openvas-scanner/releases/download/v$OPENVAS_DAEMON/openvas-scanner-v$OPENVAS_DAEMON.tar.gz.asc -o $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz.asc
 gpg --verify $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz.asc $SOURCE_DIR/openvas-scanner-$OPENVAS_DAEMON.tar.gz
 
 # Install openvasd
@@ -1129,7 +1205,8 @@ echo -e "${LGREEN}greenbone-feed-sync dependencies installed successfully...${NC
 
 # Install greenbone-feed-sync
 mkdir -p $INSTALL_DIR/greenbone-feed-sync
-${PIP_SUDO_FEED} python3 -m pip install --root=$INSTALL_DIR/greenbone-feed-sync ${PIP_OPTIONS} greenbone-feed-sync
+# ---- Added proxy ----
+${PIP_SUDO_FEED} python3 -m pip install --proxy "$PROXY_URL" --root=$INSTALL_DIR/greenbone-feed-sync ${PIP_OPTIONS} greenbone-feed-sync
 sudo cp -rvf $INSTALL_DIR/greenbone-feed-sync/* /
 
 
@@ -1159,7 +1236,8 @@ echo -e "${LGREEN}gvm-tools dependencies installed successfully...${NC}"
 
 # Install gvm-tools
 mkdir -p $INSTALL_DIR/gvm-tools
-${PIP_SUDO_TOOLS} python3 -m pip install --root=$INSTALL_DIR/gvm-tools ${PIP_OPTIONS} gvm-tools
+# ---- Added proxy ----
+${PIP_SUDO_TOOLS} python3 -m pip install --proxy "$PROXY_URL" --root=$INSTALL_DIR/gvm-tools ${PIP_OPTIONS} gvm-tools
 sudo cp -rvf $INSTALL_DIR/gvm-tools/* /
 
 
@@ -1220,7 +1298,8 @@ sudo chown gvm:gvm /usr/local/sbin/gvmd
 sudo chmod 6750 /usr/local/sbin/gvmd
 
 # Import the update feed's digital signature
-curl -f -L https://www.greenbone.net/GBCommunitySigningKey.asc -o /tmp/GBCommunitySigningKey.asc
+# ---- Added proxy ----
+curl -x "$PROXY_URL" -f -L https://www.greenbone.net/GBCommunitySigningKey.asc -o /tmp/GBCommunitySigningKey.asc
 export GNUPGHOME=/tmp/openvas-gnupg
 mkdir -p $GNUPGHOME
 gpg --import /tmp/GBCommunitySigningKey.asc
@@ -1282,7 +1361,8 @@ MINUTE=$(shuf -i 0-59 -n 1)
 sudo crontab -l >cron_1
 # Remove any previously added feed update schedules
 sudo sed -i '/greenbone-feed-sync/d' cron_1
-echo "${MINUTE} ${HOUR} * * * /usr/local/bin/greenbone-feed-sync" >>cron_1
+# ---- Edited for proxy ----
+echo "${MINUTE} ${HOUR} * * * export RSYNC_CONNECT_PROG='corkscrew $PROXY_HOST $PROXY_PORT %H %p /home/gvm/.corkscrew-auth' && /usr/local/bin/greenbone-feed-sync" >>cron_1
 sudo crontab cron_1
 rm cron_1
 echo -e "Feed update scheduled daily at ${HOUR}:${MINUTE}"
@@ -1297,7 +1377,11 @@ echo -e "#######################################################################
 # Also includes a privs fix becasue gsad is started with --drop-privileges (allowing binding to port 443), this results in gsad.log
 # being initially created with the wrong privs on 1st startup.
 echo
-sudo bash -c '/usr/local/bin/greenbone-feed-sync; systemctl start ospd-openvas; systemctl start gvmd; systemctl start gsad; systemctl start openvasd; sleep 15; systemctl stop gsad; chown -R gvm:gvm /var/log/gvm; systemctl start gsad'
+# ---- Edited for proxy ----
+sudo bash -c "export RSYNC_CONNECT_PROG='corkscrew $PROXY_HOST $PROXY_PORT %H %p /home/gvm/.corkscrew-auth'; /usr/local/bin/greenbone-feed-sync; systemctl start ospd-openvas; systemctl start gvmd; systemctl start gsad; systemctl start openvasd; sleep 15; systemctl stop gsad; chown -R gvm:gvm /var/log/gvm; systemctl start gsad"
+
+# Clean up corkscrew auth file from current user's home
+rm -f "$HOME/.corkscrew-auth"
 
 # Cheap hack to display in stdout client certificate configs (where special characters normally break cut/pasteable output)
 SHOWASTEXT1='$mypwd'

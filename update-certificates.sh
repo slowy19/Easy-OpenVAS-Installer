@@ -10,15 +10,15 @@
 #########################################################################################################################
 
 CERT_DOMAIN=""                        # Force a TLS certificate dns domain (defaults to hostname.dns-suffix if left blank)
-CERT_COUNTRY="AU"                     # For RSA SSL cert, 2 character country code only, must not be blank
-CERT_STATE="Victoria"                 # For RSA SSL cert, Optional to change, must not be blank
-CERT_LOCATION="Melbourne"             # For RSA SSL cert, Optional to change, must not be blank
-CERT_ORG="Itiligent"                  # For RSA SSL cert, Optional to change, must not be blank
+CERT_COUNTRY="RU"                     # For RSA SSL cert, 2 character country code only, must not be blank
+CERT_STATE="Russia"                   # For RSA SSL cert, Optional to change, must not be blank
+CERT_LOCATION="Moscow"                # For RSA SSL cert, Optional to change, must not be blank
+CERT_ORG="OpenVAS"                    # For RSA SSL cert, Optional to change, must not be blank
 CERT_OU="SecOps"                      # For RSA SSL cert, Optional to change, must not be blank
 CERT_DAYS="3650"                      # For RSA SSL cert, number of days until self signed certificate expiry
 DIR_TLS_CERT="/etc/gvm/certs"         # GVM default certificate location
 DIR_TLS_KEY="/etc/gvm/private"        # GVM default certificate location
-KEYSIZE=2048                          # RSA certificate encryption strength
+KEYSIZE=4096                          # RSA certificate encryption strength
 
 # Set colours
 GREY='\033[0;37m'
