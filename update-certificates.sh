@@ -9,33 +9,6 @@
 # Certificates have expired/about to expire
 #########################################################################################################################
 
-## PROXY CONFIGURATION (fill in your corporate proxy details)
-PROXY_HOST="proxy.example.com"             # Your proxy hostname or IP
-PROXY_PORT="8080"                          # Your proxy port
-PROXY_USER="your_username"                 # Proxy authentication username
-PROXY_PASS="your_password"                 # Proxy authentication password
-
-# Optional: addresses that should bypass the proxy (comma-separated)
-NO_PROXY="127.0.0.1,localhost,*.local"
-
-# -------------------------------------------------------------------------------------
-# Proxy setup
-# Build proxy URL with authentication
-PROXY_URL="http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}"
-export http_proxy="$PROXY_URL"
-export https_proxy="$PROXY_URL"
-export ftp_proxy="$PROXY_URL"
-export no_proxy="$NO_PROXY"
-export HTTP_PROXY="$PROXY_URL"
-export HTTPS_PROXY="$PROXY_URL"
-export FTP_PROXY="$PROXY_URL"
-export NO_PROXY="$NO_PROXY"
-
-# For commands that use sudo, we will use 'sudo -E' to preserve the environment.
-# Define a function to replace 'sudo' with 'sudo -E' for network-related commands.
-# We'll manually replace sudo with sudo -E where needed later.
-echo -e "${LGREEN}Proxy enabled: $PROXY_HOST:$PROXY_PORT${NC}"
-
 CERT_DOMAIN=""                        # Force a TLS certificate dns domain (defaults to hostname.dns-suffix if left blank)
 CERT_COUNTRY="RU"                     # For RSA SSL cert, 2 character country code only, must not be blank
 CERT_STATE="Russia"                   # For RSA SSL cert, Optional to change, must not be blank
